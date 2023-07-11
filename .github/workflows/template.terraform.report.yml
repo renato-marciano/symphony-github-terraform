@@ -1,0 +1,71 @@
+name: "Template-TF-Report"
+on:
+  workflow_call:
+    inputs:
+      environmentName:
+        type: string
+        required: true
+      keyVaultName:
+        type: string
+        required: true
+      branchName:
+        type: string
+        required: true
+    secrets:
+      azureEnviromentCredentials:
+        required: true
+
+jobs:
+  Report:
+    name: "Report"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.branchName }}
+
+      - name: Setup Toolset
+        run: |
+          ./setup-azcli.sh
+
+        working-directory: scripts/orchestrators
+        shell: bash
+
+      - uses: Azure/login@v1
+        name: Run Azure Login
+        with:
+          creds: "${{ secrets.azureEnviromentCredentials }}"
+          environment: "AzureCloud"
+
+      - name: Get KeyVault Secret(s)
+        id: LoadSecrets
+        env:
+          SECRETS: "clientId, clientSecret, subscriptionId, tenantId, stateRg, stateContainer, stateStorageAccount, stateStorageAccountBackup"
+        run: |
+          OIFS=$IFS
+          IFS=', '
+          for secretname in $SECRETS
+          do
+            secret=$(az keyvault secret show --name $secretname --vault-name ${{ inputs.keyVaultName }} --query "value")
+            echo "::add-mask::$secret"
+            echo "$secretname=$secret" >> $GITHUB_OUTPUT
+          done
+          IFS=$OIFS
+
+      - name: Backup Remote State
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environmentName }}
+          COMMIT_ID: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          export ARM_TENANT_ID=${{ steps.LoadSecrets.outputs.tenantId }}
+          export ARM_SUBSCRIPTION_ID=${{ steps.LoadSecrets.outputs.subscriptionId }}
+          export ARM_CLIENT_ID=${{ steps.LoadSecrets.outputs.clientId }}
+          export ARM_CLIENT_SECRET=${{ steps.LoadSecrets.outputs.clientSecret }}
+          export STATE_RG=${{ steps.LoadSecrets.outputs.stateRg }}
+          export STATE_STORAGE_ACCOUNT=${{ steps.LoadSecrets.outputs.stateStorageAccount }}
+          export STATE_STORAGE_ACCOUNT_BACKUP=${{ steps.LoadSecrets.outputs.stateStorageAccountBackup }}
+          export STATE_CONTAINER=${{ steps.LoadSecrets.outputs.stateContainer }}
+          ./iac.tf.statebackup.sh
+        working-directory: scripts/orchestrators
+        shell: bash
