@@ -2,6 +2,9 @@
 # DEPLOY  a reources group, sql server, sql database and firewall rules - Uses Remote state
 # ------------------------------------------------------------------------------------------------------
 
+resource "aws_instance" "main" {
+  instance_type = "t2.micro"
+}
 
 resource "random_string" "sqlserverlogin" {
   length  = 10
